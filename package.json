@@ -14,7 +14,7 @@
     "url": "https://github.com/jondeodat/claude-setup-cli/issues"
   },
   "bin": {
-    "claude-setup": "./dist/claude-setup-cli.js"
+    "claude-setup": "dist/claude-setup-cli.js"
   },
   "files": [
     "dist/claude-setup.js",
