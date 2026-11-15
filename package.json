@@ -1,6 +1,6 @@
 {
   "name": "@jondeodat/claude-setup-cli",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Registers the Claude Code marketplaces and installs the plugins that a project declares in .claude/settings.json, at project scope.",
   "license": "MIT",
   "type": "module",

@@ -23,7 +23,7 @@ const rewriteSettings = () => {
 const ok = (extra = {}) => console.log('progress…\\n' + JSON.stringify({ outcome: 'ok', ...extra }));
 const command = args.slice(0, 3).join(' ');
 if (args[0] === '--version') {
-  console.log('fake');
+  console.log('2.1.0 (Claude Code)');
 } else if (command === 'plugin marketplace list') {
   console.log(JSON.stringify(state.marketplaces, null, 2));
 } else if (command === 'plugin marketplace add') {
@@ -107,6 +107,8 @@ function run(args: string[] = [], extraEnv: Record<string, string> = {}) {
   };
   delete env.CI;
   delete env.CLAUDE_SETUP_SKIP;
+  // Set when the tests run from a Claude Code session: the tool would run the real claude CLI
+  delete env.CLAUDE_CODE_EXECPATH;
   // The project's .npmrc alone sets the release age of each test
   for (const name of Object.keys(env).filter((key) => key.toLowerCase() === 'npm_config_min_release_age')) {
     delete env[name];
@@ -295,6 +297,55 @@ describe('claude-setup', () => {
     expect(readState().calls).toEqual(['--version', 'plugin marketplace list', 'plugin list']);
   });
 
+  it('runs the claude CLI that CLAUDE_CODE_EXECPATH names rather than the one on the PATH', () => {
+    writeState({ versions: { 'rules@ours': '0.1.4', 'guide@theirs': '1.0.0' } });
+    const sessionClaude = join(work, 'session', 'claude');
+    mkdirSync(join(work, 'session'));
+    writeFileSync(sessionClaude, FAKE_CLAUDE);
+    chmodSync(sessionClaude, 0o755);
+    // A claude CLI too, so that only the order of the candidates keeps it out
+    writeFileSync(join(work, 'bin', 'claude'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.0.0 (Claude Code)" && exit 0\necho "not this one" >&2\nexit 1\n');
+
+    const result = run([], { CLAUDE_CODE_EXECPATH: sessionClaude });
+
+    expect(result.stderr).toBe('');
+    // Only the fake claude records its calls: the probe too ran the one CLAUDE_CODE_EXECPATH names
+    expect(readState().calls[0]).toBe('--version');
+    expect(readState().calls).toContain('plugin install rules@ours --scope project');
+    expect(result.stdout).toContain('claude-setup: plugin installed: rules@ours 0.1.4');
+  });
+
+  it('falls back to the claude CLI on the PATH when CLAUDE_CODE_EXECPATH names a missing binary', () => {
+    writeState({ versions: { 'rules@ours': '0.1.4', 'guide@theirs': '1.0.0' } });
+
+    const result = run([], { CLAUDE_CODE_EXECPATH: join(work, 'removed', 'claude') });
+
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('claude-setup: plugin installed: rules@ours 0.1.4');
+  });
+
+  it('falls back to the claude CLI on the PATH when CLAUDE_CODE_EXECPATH names another binary', () => {
+    writeState({ versions: { 'rules@ours': '0.1.4', 'guide@theirs': '1.0.0' } });
+
+    // Like the Node runtime: it answers --version, but not as Claude Code
+    const result = run([], { CLAUDE_CODE_EXECPATH: process.execPath });
+
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('claude-setup: plugin installed: rules@ours 0.1.4');
+  });
+
+  it('does nothing when no candidate answers as the claude CLI', () => {
+    writeState({});
+    writeFileSync(join(work, 'bin', 'claude'), '#!/bin/sh\necho "v1.0.0"\n');
+
+    const result = run([], { CLAUDE_CODE_EXECPATH: join(work, 'removed', 'claude') });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toBe('');
+    expect(readFileSync(join(project, '.claude', 'settings.json'), 'utf8')).toBe(SETTINGS);
+  });
+
   it('does nothing in CI', () => {
     writeState({});
 
@@ -306,7 +357,7 @@ describe('claude-setup', () => {
 
   it('reports a failure without failing', () => {
     writeState({ marketplaceNames: {} });
-    writeFileSync(join(work, 'bin', 'claude'), '#!/bin/sh\n[ "$1" = "--version" ] && exit 0\necho "no VPN" >&2\nexit 1\n');
+    writeFileSync(join(work, 'bin', 'claude'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.0 (Claude Code)" && exit 0\necho "no VPN" >&2\nexit 1\n');
 
     const result = run();
 

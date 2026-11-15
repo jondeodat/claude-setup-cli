@@ -33,12 +33,34 @@ than the min-release-age npm reads for the project (.npmrc).
 
 The claude CLI rewrites .claude/settings.json in its own format: this tool puts the file back as it was.
 It does nothing in CI (CI set), with CLAUDE_SETUP_SKIP set, or without the claude CLI, and never fails.
+The claude CLI is the one CLAUDE_CODE_EXECPATH names, set by Claude Code in a hook, or else the one on
+the PATH, whichever first answers --version as Claude Code.
 
 Options:
   --hook             prints its report as the JSON output of a SessionStart hook, and nothing when there
                      is nothing to report
   --max-age <hours>  refreshes the marketplaces only when the last refresh is older (default: every run)
   -h, --help         prints this help`;
+
+/**
+ * Finds the claude CLI to run: the one of the Claude Code session that started this tool, as a hook,
+ * which Claude Code names in CLAUDE_CODE_EXECPATH even when it is only installed as an IDE extension and
+ * puts no claude on the PATH; or else the claude on the PATH. CLAUDE_CODE_EXECPATH is not documented: it
+ * can name a binary removed by an update since, or one that is not the claude CLI, so each candidate must
+ * answer `--version` as Claude Code does
+ */
+function findClaude() {
+  const candidates = [process.env.CLAUDE_CODE_EXECPATH, 'claude'].filter((candidate) => !!candidate) as string[];
+  return candidates.find((candidate) => {
+    const probe = spawnSync(candidate, ['--version'], { encoding: 'utf8' });
+    return !probe.error && probe.status === 0 && probe.stdout.includes('Claude Code');
+  });
+}
+
+/**
+ * The claude CLI to run, that main() finds before anything runs it
+ */
+let claude = 'claude';
 
 /**
  * A `claude plugin` command can clone a marketplace
@@ -54,7 +76,7 @@ interface ClaudeResult {
  * Runs `claude <args> --json` from the project root
  */
 function runClaude(root: string, args: string[]): ClaudeResult {
-  const child = spawnSync('claude', [...args, '--json'], { cwd: root, encoding: 'utf8', timeout: CLAUDE_TIMEOUT_MS });
+  const child = spawnSync(claude, [...args, '--json'], { cwd: root, encoding: 'utf8', timeout: CLAUDE_TIMEOUT_MS });
   if (child.error) {
     return { error: `claude ${args.join(' ')}: ${child.error.message}` };
   }
@@ -345,10 +367,11 @@ function main() {
   const report = createReport();
   const original = readFileSync(settingsPath, 'utf8');
   try {
-    const probe = spawnSync('claude', ['--version'], { encoding: 'utf8' });
-    if (probe.error) {
+    const found = findClaude();
+    if (!found) {
       return;
     }
+    claude = found;
     setUp(root, JSON.parse(original) as ProjectSettings, maxAgeHours, report);
   } catch (error) {
     report.failures.push(error instanceof Error ? error.message : String(error));

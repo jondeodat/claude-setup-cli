@@ -44,6 +44,13 @@ It never fails, so that it cannot break an `npm install` or a session start: a f
 unknown plugin…) is reported, and the run goes on. It does nothing without the `claude` CLI, in CI (`CI`
 set), or with `CLAUDE_SETUP_SKIP` set.
 
+The `claude` CLI it runs is the one `CLAUDE_CODE_EXECPATH` names, or else the `claude` on the `PATH`,
+whichever first answers `--version` as Claude Code. Claude Code sets `CLAUDE_CODE_EXECPATH` in the
+processes it starts, a hook among them: a Claude Code installed only as an IDE extension puts no `claude`
+on the `PATH`, but names its own binary in the variable, so its hooks still find it. The variable is not
+documented, and may name a binary an update removed since or one that is not the `claude` CLI, hence the
+check and the fallback.
+
 ## Installation
 
 ```sh
@@ -65,15 +72,8 @@ claude-setup [--hook] [--max-age <hours>]
 - `--max-age <hours>` refreshes the marketplaces only when the last refresh, recorded in
   `node_modules/.cache/claude-setup/state.json`, is older. Without it, every run refreshes.
 
-In a project, from the `prepare` script of its `package.json`, which runs on an `npm install` or `npm ci`
-in the project itself but not where the project is installed as a dependency (unlike `postinstall`):
-
-```json
-"prepare": "claude-setup"
-```
-
-And from a `SessionStart` hook of `.claude/settings.json`, once a day. The guard skips it in a clone where
-the dependencies are not installed yet:
+In a project, from a `SessionStart` hook of `.claude/settings.json`, once a day. The guard skips it in a
+clone where the dependencies are not installed yet:
 
 ```json
 "hooks": {
@@ -90,6 +90,21 @@ the dependencies are not installed yet:
   ]
 }
 ```
+
+Optionally, also from the `prepare` script of its `package.json`, which runs on an `npm install` or
+`npm ci` in the project itself but not where the project is installed as a dependency (unlike
+`postinstall`):
+
+```json
+"prepare": "claude-setup"
+```
+
+- npm does not run it when `ignore-scripts` is set, a common hardening: `ignore-scripts` turns off the
+  scripts of the project's own `package.json` too, and `allowScripts` cannot let it through, since it only
+  covers the install scripts of dependencies and `ignore-scripts` overrides it. `npm run prepare` still
+  runs it.
+- Run by npm, it only has `CLAUDE_CODE_EXECPATH` when the `npm install` itself was started from Claude
+  Code, such as from its Bash tool: otherwise it needs `claude` on the `PATH`.
 
 ## Development
 
