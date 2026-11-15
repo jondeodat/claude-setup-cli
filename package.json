@@ -1,6 +1,6 @@
 {
   "name": "@jondeodat/claude-setup-cli",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Registers the Claude Code marketplaces and installs the plugins that a project declares in .claude/settings.json, at project scope.",
   "license": "MIT",
   "type": "module",
@@ -47,7 +47,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepublishOnly": "npm run typecheck && npm test && npm run format:check && npm run build",
-    "push": "npm publish"
+    "push": "npm publish --ignore-scripts=false"
   },
   "keywords": [
     "claude",

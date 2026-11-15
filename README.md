@@ -153,6 +153,10 @@ npm run push
 - `npm run push` runs `npm publish`, whose `prepublishOnly` script first runs `npm run typecheck`,
   `npm test`, `npm run format:check` and `npm run build`, and stops if one fails; then it publishes the
   package, publicly, on registry.npmjs.org.
+- With `ignore-scripts` set, `npm publish` skips `prepublishOnly` and ships whatever `dist/` holds, stale
+  or missing: `npm run push` passes `--ignore-scripts=false`, so publish with it rather than with
+  `npm publish`. A publish installs nothing, so this only lets the scripts of this `package.json` run, no
+  dependency's.
 
 ## License
 
