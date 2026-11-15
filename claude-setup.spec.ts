@@ -14,7 +14,7 @@ import {
   parseJsonOutput,
   parsePluginId,
   parseReleaseAgeDays,
-} from './claude-setup';
+} from './claude-setup.ts';
 
 describe('getMarketplaceArgument', () => {
   it.each([

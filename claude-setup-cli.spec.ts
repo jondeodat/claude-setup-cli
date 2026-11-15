@@ -2,7 +2,6 @@ import { execFileSync, spawnSync } from 'child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
-import { pathToFileURL } from 'url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 /**
@@ -66,8 +65,7 @@ const SETTINGS = `{
 }
 `;
 
-const tsx = pathToFileURL(require.resolve('tsx')).href;
-const cli = resolve(__dirname, 'claude-setup-cli.ts');
+const cli = resolve(import.meta.dirname, 'claude-setup-cli.ts');
 
 let work: string;
 let project: string;
@@ -114,7 +112,7 @@ function run(args: string[] = [], extraEnv: Record<string, string> = {}) {
     delete env[name];
   }
   Object.assign(env, extraEnv);
-  return spawnSync(process.execPath, ['--import', tsx, cli, ...args], { cwd: project, env, encoding: 'utf8' });
+  return spawnSync(process.execPath, [cli, ...args], { cwd: project, env, encoding: 'utf8' });
 }
 
 const DAY_MS = 86_400_000;

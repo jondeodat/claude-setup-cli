@@ -50,7 +50,8 @@ set), or with `CLAUDE_SETUP_SKIP` set.
 npm install --save-dev --save-exact @jondeodat/claude-setup-cli
 ```
 
-The script is TypeScript run by [`tsx`](https://github.com/privatenumber/tsx), its only dependency.
+It needs Node 22 or later, and has no dependencies: the package ships its TypeScript sources compiled to
+JavaScript.
 
 ## Usage
 
@@ -95,9 +96,16 @@ the dependencies are not installed yet:
 ```sh
 npm ci
 npm test              # Vitest
-npm run typecheck     # tsc: tsx runs the script without checking its types
+npm run typecheck     # tsc: Node strips the types without checking them
+npm run build         # tsc -p tsconfig.build.json: compiles to dist/, what the package ships
 npm run format:check  # Prettier
 ```
+
+Node runs the TypeScript sources directly, by stripping their types (`npm start`, the CLI tests). It needs
+Node 22.18 or later: the `devEngines` of `package.json` makes older ones refuse to install.
+`erasableSyntaxOnly` in `tsconfig.json` keeps out the syntax Node cannot strip (`enum`, `namespace`…), and
+the relative imports name the `.ts` file, which `tsc` rewrites to `.js` in `dist/`. Node refuses to strip
+the types of a file under `node_modules`, hence the compiled package.
 
 ### Dependency install scripts
 
@@ -113,10 +121,7 @@ npm install-scripts approve <pkg>  # pinned to the reviewed version: approve aga
 npm install-scripts deny <pkg>
 ```
 
-- `esbuild` (through `tsx` and `vitest`) is denied. Its `postinstall` checks the native binary and copies
-  it over the JavaScript launcher `bin/esbuild`; the binary comes from the optional dependency of the
-  platform (`@esbuild/darwin-arm64`, `@esbuild/linux-x64`…), where the JavaScript API used by tsx and
-  vitest runs it.
+No dependency has an install script at the moment: `allowScripts` is empty.
 
 `.npmrc` also sets `min-release-age=7`: npm installs no version published less than 7 days ago.
 
@@ -130,8 +135,9 @@ npm run push
 ```
 
 - `npm version` only updates `package.json` and `package-lock.json`: commit them with the change they ship.
-- `npm run push` first runs `npm run typecheck`, `npm test` and `npm run format:check`, and stops if one
-  fails; then it publishes the package, publicly, on registry.npmjs.org.
+- `npm run push` runs `npm publish`, whose `prepublishOnly` script first runs `npm run typecheck`,
+  `npm test`, `npm run format:check` and `npm run build`, and stops if one fails; then it publishes the
+  package, publicly, on registry.npmjs.org.
 
 ## License
 

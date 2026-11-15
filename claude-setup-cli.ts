@@ -1,4 +1,4 @@
-#!/usr/bin/env -S node --import tsx
+#!/usr/bin/env node
 
 import { spawnSync } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
@@ -22,7 +22,7 @@ import {
   parseReleaseAgeDays,
   type ProjectSettings,
   type Report,
-} from './claude-setup';
+} from './claude-setup.ts';
 
 const USAGE = `Usage: claude-setup [--hook] [--max-age <hours>]
 
