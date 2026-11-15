@@ -1,0 +1,18 @@
+# dependencies
+/node_modules
+
+# IDEs and editors
+*.iml
+/.idea
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# misc
+/coverage
+npm-debug.log
+*.tgz
+
+# system files
+.DS_Store
+Thumbs.db

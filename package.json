@@ -1,0 +1,62 @@
+{
+  "name": "@jondeodat/claude-setup-cli",
+  "version": "0.1.0",
+  "description": "Registers the Claude Code marketplaces and installs the plugins that a project declares in .claude/settings.json, at project scope.",
+  "license": "MIT",
+  "author": "Jon Deodat <deodatamadeus@gmail.com>",
+  "homepage": "https://github.com/jondeodat/claude-setup-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jondeodat/claude-setup-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jondeodat/claude-setup-cli/issues"
+  },
+  "bin": {
+    "claude-setup": "./claude-setup-cli.ts"
+  },
+  "files": [
+    "claude-setup.ts",
+    "claude-setup-cli.ts"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "npm",
+      "version": ">=11.20.0",
+      "onFail": "error"
+    }
+  },
+  "scripts": {
+    "start": "node --import tsx claude-setup-cli.ts",
+    "typecheck": "tsc",
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepush": "npm run typecheck && npm test && npm run format:check",
+    "push": "npm publish"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "plugin",
+    "marketplace",
+    "setup"
+  ],
+  "dependencies": {
+    "tsx": "4.23.15"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.0",
+    "prettier": "3.9.9",
+    "typescript": "5.9.3",
+    "vite": "8.3.3",
+    "vitest": "5.0.3"
+  },
+  "allowScripts": {
+    "esbuild": false
+  }
+}
