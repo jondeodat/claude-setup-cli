@@ -1,0 +1,19 @@
+{
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "extraKnownMarketplaces": {
+    "jd-front-marketplace": {
+      "source": {
+        "source": "git",
+        "url": "git@github.com:jondeodat/jd-front-marketplace.git"
+      },
+      "autoUpdate": true
+    }
+  },
+  "enabledPlugins": {
+    "front-working-rules@jd-front-marketplace": true
+  }
+}
