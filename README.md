@@ -161,6 +161,9 @@ npm run push
   or missing: `npm run push` passes `--ignore-scripts=false`, so publish with it rather than with
   `npm publish`. A publish installs nothing, so this only lets the scripts of this `package.json` run, no
   dependency's.
+- `npm run push` logs in to npm first and logs out afterwards, even when the publish fails: `npm logout`
+  revokes the token that `npm login` wrote in the user `.npmrc`, so no valid token stays on disk between
+  publishes. The script needs a POSIX shell (`sh`, the default for npm scripts on macOS and Linux).
 
 ## License
 

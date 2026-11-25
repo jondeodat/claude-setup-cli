@@ -47,7 +47,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "prepublishOnly": "npm run typecheck && npm test && npm run format:check && npm run build",
-    "push": "npm publish --ignore-scripts=false"
+    "push": "npm login || exit 1; npm publish --ignore-scripts=false; status=$?; npm logout; exit $status"
   },
   "keywords": [
     "claude",
