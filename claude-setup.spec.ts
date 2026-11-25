@@ -195,12 +195,12 @@ describe('formatHookOutput', () => {
     expect(output.hookSpecificOutput.additionalContext).toContain('/reload-plugins');
   });
 
-  it('keeps failures for the terminal only', () => {
+  it('asks Claude to pass the failures on too', () => {
     const report = createReport();
     report.failures.push('claude plugin marketplace update m: no VPN');
     const output = JSON.parse(formatHookOutput(report)!);
 
     expect(output.systemMessage).toContain('failed: claude plugin marketplace update m: no VPN');
-    expect(output.hookSpecificOutput).toBeUndefined();
+    expect(output.hookSpecificOutput.additionalContext).toContain('failed: claude plugin marketplace update m: no VPN.');
   });
 });

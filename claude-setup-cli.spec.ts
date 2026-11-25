@@ -242,18 +242,21 @@ describe('claude-setup', () => {
     expect(result.stdout).toContain('plugin updated: guide@theirs 1.0.0 → 1.1.0');
   });
 
-  it('holds back a newer version, reports it once, and remembers when it was first seen', () => {
+  it('holds back a newer version, reports it at each refresh, and remembers when it was first seen', () => {
     setReleaseAge(7);
     offerGuideUpdate(0);
     const appliesOn = new Date(Date.now() + 7 * DAY_MS).toISOString().slice(0, 10);
+    const heldBack = `plugin update held back by min-release-age: guide@theirs 1.0.0 → 1.1.0, applied from ${appliesOn}`;
 
     const first = run();
-    const second = run();
+    const second = run(['--hook']);
 
     expect(readState().calls.some((call) => call.startsWith('plugin update guide@theirs'))).toBe(false);
-    expect(first.stdout).toContain(`plugin update held back by min-release-age: guide@theirs 1.0.0 → 1.1.0, applied from ${appliesOn}`);
+    expect(first.stdout).toContain(heldBack);
     expect(first.stdout).not.toContain('/reload-plugins');
-    expect(second.stdout).toBe('');
+    const output = JSON.parse(second.stdout);
+    expect(output.systemMessage).toContain(heldBack);
+    expect(output.hookSpecificOutput.additionalContext).toContain(`guide@theirs 1.0.0 → 1.1.0 from ${appliesOn}`);
     const state = JSON.parse(readFileSync(join(project, 'node_modules', '.cache', 'claude-setup', 'state.json'), 'utf8'));
     expect(Object.keys(state.firstSeen)).toEqual(['guide@theirs 1.1.0']);
   });
@@ -267,6 +270,19 @@ describe('claude-setup', () => {
     run();
 
     expect(readState().calls).toContain('plugin update guide@theirs --scope project');
+  });
+
+  it('holds back the update and reports it when npm cannot tell the min-release-age', () => {
+    offerGuideUpdate(30);
+    writeFileSync(join(work, 'bin', 'npm'), '#!/bin/sh\necho "npm broke" >&2\nexit 1\n');
+    chmodSync(join(work, 'bin', 'npm'), 0o755);
+
+    const result = run(['--hook']);
+
+    expect(readState().calls.some((call) => call.startsWith('plugin update guide@theirs'))).toBe(false);
+    const output = JSON.parse(result.stdout);
+    expect(output.systemMessage).toContain('failed: npm config get min-release-age: npm broke');
+    expect(output.hookSpecificOutput.additionalContext).toContain('npm broke');
   });
 
   it('updates at once when npm sets no min-release-age', () => {
@@ -344,6 +360,29 @@ describe('claude-setup', () => {
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('');
     expect(readFileSync(join(project, '.claude', 'settings.json'), 'utf8')).toBe(SETTINGS);
+  });
+
+  it('reports to the session, as a hook, that no candidate answers as the claude CLI', () => {
+    writeState({});
+    writeFileSync(join(work, 'bin', 'claude'), '#!/bin/sh\necho "v1.0.0"\n');
+    const removed = join(work, 'removed', 'claude');
+
+    const result = run(['--hook'], { CLAUDE_CODE_EXECPATH: removed });
+
+    expect(result.status).toBe(0);
+    const output = JSON.parse(result.stdout);
+    const failure = `no claude CLI found (CLAUDE_CODE_EXECPATH (${removed}): not found; claude on the PATH: --version answers "v1.0.0", not Claude Code)`;
+    expect(output.systemMessage).toContain(`failed: ${failure}`);
+    expect(output.hookSpecificOutput.additionalContext).toContain(failure);
+  });
+
+  it('reports a wrong option to the session as a hook, without failing it', () => {
+    writeState({});
+
+    const result = run(['--hook', '--max-age', 'soon']);
+
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toContain('--max-age expects a number of hours');
   });
 
   it('does nothing in CI', () => {

@@ -37,12 +37,14 @@ overrides it); without one, updates apply at once.
 A marketplace clone is shallow, so the commit that introduced a version is out of reach. The release date
 is estimated as the earlier of the day `claude-setup` first saw the version and the date of the last
 commit of the clone: both come after the release, so the delay is never shortened, at worst lengthened.
-A held-back version is reported once, with the day it will apply; the first sightings are recorded in
-`node_modules/.cache/claude-setup/state.json`.
+A held-back version is reported at each refresh until it applies, with the day it will; the first
+sightings are recorded in `node_modules/.cache/claude-setup/state.json`. When npm cannot tell the delay
+(npm missing or failing), these updates are held back and the failure is reported.
 
 It never fails, so that it cannot break an `npm install` or a session start: a failure (network down,
-unknown plugin…) is reported, and the run goes on. It does nothing without the `claude` CLI, in CI (`CI`
-set), or with `CLAUDE_SETUP_SKIP` set.
+unknown plugin…) is reported, and the run goes on. It does nothing in CI (`CI` set), with
+`CLAUDE_SETUP_SKIP` set, or without the `claude` CLI: run by npm, silently, since the machine may not
+have Claude Code; as a hook, it reports that none was found and why each candidate was turned down.
 
 The `claude` CLI it runs is the one `CLAUDE_CODE_EXECPATH` names, or else the `claude` on the `PATH`,
 whichever first answers `--version` as Claude Code. Claude Code sets `CLAUDE_CODE_EXECPATH` in the
@@ -68,7 +70,9 @@ claude-setup [--hook] [--max-age <hours>]
 
 - `--hook` prints its report as the JSON output of a `SessionStart` hook, and nothing when there is nothing
   to report. The terminal shows its `systemMessage`, in yellow; the IDE extensions do not show it, so an
-  `additionalContext` asks Claude to pass the news on at the start of its first reply.
+  `additionalContext` asks Claude to pass the news on at the start of its first reply, failures
+  included. Even a wrong option or an unexpected error is reported this way, with a zero exit code:
+  Claude Code ignores the output of a hook that fails.
 - `--max-age <hours>` refreshes the marketplaces only when the last refresh, recorded in
   `node_modules/.cache/claude-setup/state.json`, is older. Without it, every run refreshes.
 

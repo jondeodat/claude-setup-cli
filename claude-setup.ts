@@ -34,7 +34,7 @@ export interface Report {
   installed: { id: string; version?: string }[];
   updated: { id: string; from?: string; to?: string }[];
   /**
-   * The updates held back by the release age, reported once, when first seen
+   * The updates held back by the release age, reported at each refresh until they apply
    */
   pending: { id: string; from?: string; to: string; appliesOn: string }[];
   failures: string[];
@@ -227,7 +227,8 @@ const RESET = '\u001b[0m';
 /**
  * The JSON a SessionStart hook prints to report a run, or undefined when there is nothing to report.
  * The terminal shows `systemMessage`, the IDE extensions do not: there, `additionalContext` asks
- * Claude to pass the news on in its first reply.
+ * Claude to pass the news on in its first reply, failures included, so that a hook that stopped working
+ * does not go unnoticed.
  */
 export function formatHookOutput(report: Report) {
   const lines = formatLines(report);
@@ -252,6 +253,9 @@ export function formatHookOutput(report: Report) {
         report.pending.map((change) => `${describeChange(change)} from ${change.appliesOn}`).join(', ') +
         '.',
     );
+  }
+  if (report.failures.length > 0) {
+    news.push(`The claude-setup hook, which sets up the Claude Code plugins of this project, failed: ${report.failures.join('; ')}.`);
   }
   if (news.length > 0) {
     output.hookSpecificOutput = {

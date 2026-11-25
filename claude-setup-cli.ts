@@ -47,14 +47,32 @@ Options:
  * which Claude Code names in CLAUDE_CODE_EXECPATH even when it is only installed as an IDE extension and
  * puts no claude on the PATH; or else the claude on the PATH. CLAUDE_CODE_EXECPATH is not documented: it
  * can name a binary removed by an update since, or one that is not the claude CLI, so each candidate must
- * answer `--version` as Claude Code does
+ * answer `--version` as Claude Code does. Without one, tells why each candidate was turned down.
  */
-function findClaude() {
-  const candidates = [process.env.CLAUDE_CODE_EXECPATH, 'claude'].filter((candidate) => !!candidate) as string[];
-  return candidates.find((candidate) => {
-    const probe = spawnSync(candidate, ['--version'], { encoding: 'utf8' });
-    return !probe.error && probe.status === 0 && probe.stdout.includes('Claude Code');
-  });
+function findClaude(): { path: string } | { rejections: string[] } {
+  const candidates = [
+    { path: process.env.CLAUDE_CODE_EXECPATH, label: `CLAUDE_CODE_EXECPATH (${process.env.CLAUDE_CODE_EXECPATH})` },
+    { path: 'claude', label: 'claude on the PATH' },
+  ];
+  const rejections: string[] = [];
+  for (const { path, label } of candidates) {
+    if (!path) {
+      continue;
+    }
+    const probe = spawnSync(path, ['--version'], { encoding: 'utf8' });
+    if (!probe.error && probe.status === 0 && probe.stdout.includes('Claude Code')) {
+      return { path };
+    }
+    const reason = probe.error
+      ? (probe.error as NodeJS.ErrnoException).code === 'ENOENT'
+        ? 'not found'
+        : probe.error.message
+      : probe.status !== 0
+        ? `--version exits with code ${probe.status}`
+        : `--version answers "${probe.stdout.trim().split('\n')[0]}", not Claude Code`;
+    rejections.push(`${label}: ${reason}`);
+  }
+  return { rejections };
 }
 
 /**
@@ -185,11 +203,18 @@ interface State {
 }
 
 /**
- * The project's minimum release age, in days, as npm resolves it from its .npmrc files and environment
+ * The project's minimum release age, in days, as npm resolves it from its .npmrc files and environment,
+ * or the reason npm could not tell
  */
-function readReleaseAgeDays(root: string) {
+function readReleaseAgeDays(root: string): { days: number } | { error: string } {
   const child = spawnSync('npm', ['config', 'get', 'min-release-age'], { cwd: root, encoding: 'utf8' });
-  return child.error || child.status !== 0 ? 0 : parseReleaseAgeDays(child.stdout);
+  if (child.error) {
+    return { error: (child.error as NodeJS.ErrnoException).code === 'ENOENT' ? 'npm not found' : child.error.message };
+  }
+  if (child.status !== 0) {
+    return { error: child.stderr.trim() || `exit code ${child.status}` };
+  }
+  return { days: parseReleaseAgeDays(child.stdout) };
 }
 
 /**
@@ -230,10 +255,19 @@ function refresh(root: string, settings: ProjectSettings, known: Set<string>, in
     }
   }
 
-  const locations = new Map(asArray<{ name: string; installLocation?: string }>(runClaude(root, ['plugin', 'marketplace', 'list']).output).map(({ name, installLocation }) => [name, installLocation]));
+  const listing = runClaude(root, ['plugin', 'marketplace', 'list']);
+  if (listing.error) {
+    report.failures.push(listing.error);
+  }
+  const locations = new Map(asArray<{ name: string; installLocation?: string }>(listing.output).map(({ name, installLocation }) => [name, installLocation]));
   const installed = listInstalledPlugins(root, report);
   const justInstalled = new Set(report.installed.map(({ id }) => id));
-  const minAgeDays = readReleaseAgeDays(root);
+  const releaseAge = readReleaseAgeDays(root);
+  // Without the delay, the updates it covers wait rather than apply at once
+  const minAgeDays = 'days' in releaseAge ? releaseAge.days : undefined;
+  if ('error' in releaseAge) {
+    report.failures.push(`npm config get min-release-age: ${releaseAge.error}; the updates of the marketplaces without autoUpdate are held back`);
+  }
   const firstSeen: Record<string, number> = {};
   const enabledIds = getEnabledPlugins(settings);
   let hasRunUpdate = false;
@@ -264,16 +298,16 @@ function refresh(root: string, settings: ProjectSettings, known: Set<string>, in
 
     const key = `${id} ${offered}`;
     const firstSeenAt = state.firstSeen?.[key] ?? now;
-    const appliesAt = getAppliesAt(estimateReleasedAt(firstSeenAt, readLastCommittedAt(location)), minAgeDays);
-    if (now >= appliesAt) {
-      update(root, id, installation.scope, report);
-      hasRunUpdate = true;
-      continue;
-    }
-    firstSeen[key] = firstSeenAt;
-    if (state.firstSeen?.[key] === undefined) {
+    if (minAgeDays !== undefined) {
+      const appliesAt = getAppliesAt(estimateReleasedAt(firstSeenAt, readLastCommittedAt(location)), minAgeDays);
+      if (now >= appliesAt) {
+        update(root, id, installation.scope, report);
+        hasRunUpdate = true;
+        continue;
+      }
       report.pending.push({ id, from: installation.version, to: offered, appliesOn: new Date(appliesAt).toISOString().slice(0, 10) });
     }
+    firstSeen[key] = firstSeenAt;
   }
 
   const installedAfter = hasRunUpdate ? listInstalledPlugins(root, report) : installed;
@@ -323,7 +357,30 @@ function print(report: Report, isHook: boolean) {
   }
 }
 
-function parseOptions() {
+/**
+ * Reports a failure that stops the run. As a hook, it goes to the session and the exit code stays 0:
+ * Claude Code reads the output of a hook that succeeds only.
+ */
+function printFailure(message: string, isHook: boolean) {
+  const report = createReport();
+  report.failures.push(message);
+  print(report, isHook);
+}
+
+function printUsageError(message: string, isHook: boolean) {
+  if (isHook) {
+    printFailure(message, true);
+    return;
+  }
+  console.error(`claude-setup: ${message}\n\n${USAGE}`);
+  process.exitCode = 1;
+}
+
+function getMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function parseOptions(isHook: boolean) {
   try {
     return parseArgs({
       options: {
@@ -333,14 +390,13 @@ function parseOptions() {
       },
     }).values;
   } catch (error) {
-    console.error(`claude-setup: ${error instanceof Error ? error.message : String(error)}\n\n${USAGE}`);
-    process.exitCode = 1;
+    printUsageError(getMessage(error), isHook);
     return undefined;
   }
 }
 
-function main() {
-  const values = parseOptions();
+function main(isHook: boolean) {
+  const values = parseOptions(isHook);
   if (!values) {
     return;
   }
@@ -350,8 +406,7 @@ function main() {
   }
   const maxAgeHours = values['max-age'] === undefined ? undefined : Number(values['max-age']);
   if (maxAgeHours !== undefined && !(maxAgeHours >= 0)) {
-    console.error(`claude-setup: --max-age expects a number of hours\n\n${USAGE}`);
-    process.exitCode = 1;
+    printUsageError('--max-age expects a number of hours', isHook);
     return;
   }
   if (process.env.CI || process.env.CLAUDE_SETUP_SKIP) {
@@ -363,18 +418,20 @@ function main() {
   if (!existsSync(settingsPath)) {
     return;
   }
-  const isHook = values.hook === true;
   const report = createReport();
   const original = readFileSync(settingsPath, 'utf8');
   try {
     const found = findClaude();
-    if (!found) {
-      return;
+    if ('path' in found) {
+      claude = found.path;
+      setUp(root, JSON.parse(original) as ProjectSettings, maxAgeHours, report);
+    } else if (isHook) {
+      // Run by npm, on a machine without Claude Code, there is nothing to set up. A hook runs in a
+      // Claude Code session: its claude CLI must be there.
+      report.failures.push(`no claude CLI found (${found.rejections.join('; ')})`);
     }
-    claude = found;
-    setUp(root, JSON.parse(original) as ProjectSettings, maxAgeHours, report);
   } catch (error) {
-    report.failures.push(error instanceof Error ? error.message : String(error));
+    report.failures.push(getMessage(error));
   } finally {
     if (readFileSync(settingsPath, 'utf8') !== original) {
       writeFileSync(settingsPath, original);
@@ -383,9 +440,11 @@ function main() {
   print(report, isHook);
 }
 
+// Known before the options are parsed, so that even an error parsing them reaches the session
+const isHook = process.argv.slice(2).includes('--hook');
 try {
-  main();
+  main(isHook);
 } catch (error) {
   // Never fail the npm install or the session start that runs this tool
-  console.error(`claude-setup: ${error instanceof Error ? error.message : String(error)}`);
+  printFailure(getMessage(error), isHook);
 }
