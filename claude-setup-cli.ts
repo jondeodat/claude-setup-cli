@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { parseArgs } from 'util';
 import {
@@ -33,8 +33,8 @@ than the min-release-age npm reads for the project (.npmrc).
 
 The claude CLI rewrites .claude/settings.json in its own format: this tool puts the file back as it was.
 It does nothing in CI (CI set), with CLAUDE_SETUP_SKIP set, or without the claude CLI, and never fails.
-The claude CLI is the one CLAUDE_CODE_EXECPATH names, set by Claude Code in a hook, or else the one on
-the PATH, whichever first answers --version as Claude Code.
+The claude CLI is the binary of the process CLAUDE_PID names, set by Claude Code in a hook, or else the
+one on the PATH, whichever first answers --version as Claude Code.
 
 Options:
   --hook             prints its report as the JSON output of a SessionStart hook, and nothing when there
@@ -43,34 +43,60 @@ Options:
   -h, --help         prints this help`;
 
 /**
+ * The binary of the Claude Code session that started this tool, as a hook or from its Bash tool: Claude
+ * Code names its process in CLAUDE_PID. Or why it cannot be found.
+ */
+function findSessionBinary() {
+  const pid = process.env.CLAUDE_PID;
+  if (!pid) {
+    return { label: 'CLAUDE_PID', reason: 'not set' };
+  }
+  if (!/^\d+$/.test(pid)) {
+    return { label: `CLAUDE_PID (${pid})`, reason: 'not a process ID' };
+  }
+  let path = '';
+  if (process.platform === 'linux') {
+    try {
+      path = readlinkSync(`/proc/${pid}/exe`);
+    } catch {
+      // No such process, or one this user cannot read
+    }
+  } else {
+    // On macOS, the full path of the binary: on Linux, ps would print only the first 15 characters of its name
+    const ps = spawnSync('ps', ['-o', 'comm=', '-p', pid], { encoding: 'utf8' });
+    path = ps.status === 0 ? ps.stdout.trim() : '';
+  }
+  return path ? { label: `CLAUDE_PID (${pid}: ${path})`, path } : { label: `CLAUDE_PID (${pid})`, reason: 'no such process' };
+}
+
+/**
  * Finds the claude CLI to run: the one of the Claude Code session that started this tool, as a hook,
- * which Claude Code names in CLAUDE_CODE_EXECPATH even when it is only installed as an IDE extension and
- * puts no claude on the PATH; or else the claude on the PATH. CLAUDE_CODE_EXECPATH is not documented: it
- * can name a binary removed by an update since, or one that is not the claude CLI, so each candidate must
- * answer `--version` as Claude Code does. Without one, tells why each candidate was turned down.
+ * even when Claude Code is only installed as an IDE extension and puts no claude on the PATH; or else the
+ * claude on the PATH. CLAUDE_PID is not documented, and its process can run a binary that is not the
+ * claude CLI (Node, for a Claude Code installed with npm), so each candidate must answer `--version` as
+ * Claude Code does. Without one, tells why each candidate was turned down.
  */
 function findClaude(): { path: string } | { rejections: string[] } {
-  const candidates = [
-    { path: process.env.CLAUDE_CODE_EXECPATH, label: `CLAUDE_CODE_EXECPATH (${process.env.CLAUDE_CODE_EXECPATH})` },
-    { path: 'claude', label: 'claude on the PATH' },
-  ];
+  const candidates = [findSessionBinary(), { label: 'claude on the PATH', path: 'claude' }];
   const rejections: string[] = [];
-  for (const { path, label } of candidates) {
+  for (const { label, path, reason } of candidates) {
     if (!path) {
+      // Said rather than skipped: a report that only mentions the PATH hides that the session's was not found
+      rejections.push(`${label}: ${reason}`);
       continue;
     }
     const probe = spawnSync(path, ['--version'], { encoding: 'utf8' });
     if (!probe.error && probe.status === 0 && probe.stdout.includes('Claude Code')) {
       return { path };
     }
-    const reason = probe.error
+    const failure = probe.error
       ? (probe.error as NodeJS.ErrnoException).code === 'ENOENT'
         ? 'not found'
         : probe.error.message
       : probe.status !== 0
         ? `--version exits with code ${probe.status}`
         : `--version answers "${probe.stdout.trim().split('\n')[0]}", not Claude Code`;
-    rejections.push(`${label}: ${reason}`);
+    rejections.push(`${label}: ${failure}`);
   }
   return { rejections };
 }

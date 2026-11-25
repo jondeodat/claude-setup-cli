@@ -46,12 +46,13 @@ unknown plugin…) is reported, and the run goes on. It does nothing in CI (`CI`
 `CLAUDE_SETUP_SKIP` set, or without the `claude` CLI: run by npm, silently, since the machine may not
 have Claude Code; as a hook, it reports that none was found and why each candidate was turned down.
 
-The `claude` CLI it runs is the one `CLAUDE_CODE_EXECPATH` names, or else the `claude` on the `PATH`,
-whichever first answers `--version` as Claude Code. Claude Code sets `CLAUDE_CODE_EXECPATH` in the
-processes it starts, a hook among them: a Claude Code installed only as an IDE extension puts no `claude`
-on the `PATH`, but names its own binary in the variable, so its hooks still find it. The variable is not
-documented, and may name a binary an update removed since or one that is not the `claude` CLI, hence the
-check and the fallback.
+The `claude` CLI it runs is the binary of the process `CLAUDE_PID` names, or else the `claude` on the
+`PATH`, whichever first answers `--version` as Claude Code. Claude Code sets `CLAUDE_PID` to its own
+process in the processes it starts, hooks and its Bash tool among them: a Claude Code installed only as an
+IDE extension puts no `claude` on the `PATH`, but its hooks still find its binary. The binary is read with
+`ps` on macOS and from `/proc` on Linux. The variable is not documented, and its process may run a binary
+that is not the `claude` CLI (Node, for a Claude Code installed with npm), hence the check and the
+fallback. (`CLAUDE_CODE_EXECPATH` names the binary too, but only in the Bash tool: hooks do not get it.)
 
 ## Installation
 
@@ -107,7 +108,7 @@ Optionally, also from the `prepare` script of its `package.json`, which runs on 
   scripts of the project's own `package.json` too, and `allowScripts` cannot let it through, since it only
   covers the install scripts of dependencies and `ignore-scripts` overrides it. `npm run prepare` still
   runs it.
-- Run by npm, it only has `CLAUDE_CODE_EXECPATH` when the `npm install` itself was started from Claude
+- Run by npm, it only has `CLAUDE_PID` when the `npm install` itself was started from Claude
   Code, such as from its Bash tool: otherwise it needs `claude` on the `PATH`.
 
 ## Development

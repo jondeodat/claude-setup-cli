@@ -107,7 +107,9 @@ function run(args: string[] = [], extraEnv: Record<string, string> = {}) {
   };
   delete env.CI;
   delete env.CLAUDE_SETUP_SKIP;
-  // Set when the tests run from a Claude Code session: the tool would run the real claude CLI
+  // Set when the tests run from a Claude Code session: the tool would run the real claude CLI. The older
+  // CLAUDE_CODE_EXECPATH too, which earlier versions read, so that running these tests on one is safe.
+  delete env.CLAUDE_PID;
   delete env.CLAUDE_CODE_EXECPATH;
   // The project's .npmrc alone sets the release age of each test
   for (const name of Object.keys(env).filter((key) => key.toLowerCase() === 'npm_config_min_release_age')) {
@@ -118,6 +120,11 @@ function run(args: string[] = [], extraEnv: Record<string, string> = {}) {
 }
 
 const DAY_MS = 86_400_000;
+
+/**
+ * A process ID above the largest one macOS and Linux hand out
+ */
+const NO_PROCESS = '99999999';
 
 /**
  * Lays out a marketplace clone, a git repository whose single commit dates from `committedDaysAgo`,
@@ -313,38 +320,42 @@ describe('claude-setup', () => {
     expect(readState().calls).toEqual(['--version', 'plugin marketplace list', 'plugin list']);
   });
 
-  it('runs the claude CLI that CLAUDE_CODE_EXECPATH names rather than the one on the PATH', () => {
+  // On Linux, the binary is read from /proc, which no fake ps can stand in for
+  it.skipIf(process.platform === 'linux')('runs the claude CLI of the CLAUDE_PID process rather than the one on the PATH', () => {
     writeState({ versions: { 'rules@ours': '0.1.4', 'guide@theirs': '1.0.0' } });
     const sessionClaude = join(work, 'session', 'claude');
     mkdirSync(join(work, 'session'));
     writeFileSync(sessionClaude, FAKE_CLAUDE);
     chmodSync(sessionClaude, 0o755);
+    // A session process that runs the fake claude
+    writeFileSync(join(work, 'bin', 'ps'), `#!/bin/sh\n[ "$*" = "-o comm= -p 4242" ] && echo "${sessionClaude}" && exit 0\nexit 1\n`);
+    chmodSync(join(work, 'bin', 'ps'), 0o755);
     // A claude CLI too, so that only the order of the candidates keeps it out
     writeFileSync(join(work, 'bin', 'claude'), '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.0.0 (Claude Code)" && exit 0\necho "not this one" >&2\nexit 1\n');
 
-    const result = run([], { CLAUDE_CODE_EXECPATH: sessionClaude });
+    const result = run([], { CLAUDE_PID: '4242' });
 
     expect(result.stderr).toBe('');
-    // Only the fake claude records its calls: the probe too ran the one CLAUDE_CODE_EXECPATH names
+    // Only the fake claude records its calls: the probe too ran the session's
     expect(readState().calls[0]).toBe('--version');
     expect(readState().calls).toContain('plugin install rules@ours --scope project');
     expect(result.stdout).toContain('claude-setup: plugin installed: rules@ours 0.1.4');
   });
 
-  it('falls back to the claude CLI on the PATH when CLAUDE_CODE_EXECPATH names a missing binary', () => {
+  it('falls back to the claude CLI on the PATH when CLAUDE_PID names no process', () => {
     writeState({ versions: { 'rules@ours': '0.1.4', 'guide@theirs': '1.0.0' } });
 
-    const result = run([], { CLAUDE_CODE_EXECPATH: join(work, 'removed', 'claude') });
+    const result = run([], { CLAUDE_PID: NO_PROCESS });
 
     expect(result.stderr).toBe('');
     expect(result.stdout).toContain('claude-setup: plugin installed: rules@ours 0.1.4');
   });
 
-  it('falls back to the claude CLI on the PATH when CLAUDE_CODE_EXECPATH names another binary', () => {
+  it('falls back to the claude CLI on the PATH when the CLAUDE_PID process runs another binary', () => {
     writeState({ versions: { 'rules@ours': '0.1.4', 'guide@theirs': '1.0.0' } });
 
-    // Like the Node runtime: it answers --version, but not as Claude Code
-    const result = run([], { CLAUDE_CODE_EXECPATH: process.execPath });
+    // This test's own process, which runs Node: it answers --version, but not as Claude Code
+    const result = run([], { CLAUDE_PID: String(process.pid) });
 
     expect(result.stderr).toBe('');
     expect(result.stdout).toContain('claude-setup: plugin installed: rules@ours 0.1.4');
@@ -354,7 +365,7 @@ describe('claude-setup', () => {
     writeState({});
     writeFileSync(join(work, 'bin', 'claude'), '#!/bin/sh\necho "v1.0.0"\n');
 
-    const result = run([], { CLAUDE_CODE_EXECPATH: join(work, 'removed', 'claude') });
+    const result = run([], { CLAUDE_PID: NO_PROCESS });
 
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
@@ -365,13 +376,25 @@ describe('claude-setup', () => {
   it('reports to the session, as a hook, that no candidate answers as the claude CLI', () => {
     writeState({});
     writeFileSync(join(work, 'bin', 'claude'), '#!/bin/sh\necho "v1.0.0"\n');
-    const removed = join(work, 'removed', 'claude');
 
-    const result = run(['--hook'], { CLAUDE_CODE_EXECPATH: removed });
+    const result = run(['--hook'], { CLAUDE_PID: NO_PROCESS });
 
     expect(result.status).toBe(0);
     const output = JSON.parse(result.stdout);
-    const failure = `no claude CLI found (CLAUDE_CODE_EXECPATH (${removed}): not found; claude on the PATH: --version answers "v1.0.0", not Claude Code)`;
+    const failure = `no claude CLI found (CLAUDE_PID (${NO_PROCESS}): no such process; claude on the PATH: --version answers "v1.0.0", not Claude Code)`;
+    expect(output.systemMessage).toContain(`failed: ${failure}`);
+    expect(output.hookSpecificOutput.additionalContext).toContain(failure);
+  });
+
+  it('reports to the session, as a hook, that CLAUDE_PID is not set', () => {
+    writeState({});
+    writeFileSync(join(work, 'bin', 'claude'), '#!/bin/sh\necho "v1.0.0"\n');
+
+    const result = run(['--hook']);
+
+    expect(result.status).toBe(0);
+    const output = JSON.parse(result.stdout);
+    const failure = 'no claude CLI found (CLAUDE_PID: not set; claude on the PATH: --version answers "v1.0.0", not Claude Code)';
     expect(output.systemMessage).toContain(`failed: ${failure}`);
     expect(output.hookSpecificOutput.additionalContext).toContain(failure);
   });
